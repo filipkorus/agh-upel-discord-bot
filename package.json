@@ -4,6 +4,7 @@
   "description": "",
   "main": "index.js",
   "dependencies": {
+    "cheerio": "^1.0.0-rc.10",
     "discord.js": "^12.5.1",
     "dotenv": "^8.2.0",
     "puppeteer": "^13.3.1"
