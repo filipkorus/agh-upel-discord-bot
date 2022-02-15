@@ -27,8 +27,8 @@ client.on('message', msg => {
    if (CMD_NAME === 'name') {
       if (args.length != 1) return msg.reply(`Incorrect syntax!\nTry: \`${PREFIX}${CMD_NAME} user_id\``);
       (async () => {
-         const { name } = await getUserById(args[0]);
-         msg.channel.send(name == null ? "User not found" : name);
+         const user = await getUserById(args[0]);
+         msg.channel.send(user.name == null ? 'User not found' : `${user.name}: ${user.last_time_online.toString().toDDHHMMSS()}`);
       })();
       return;
    }
@@ -37,7 +37,7 @@ client.on('message', msg => {
       if (args.length != 1) return msg.reply(`Incorrect syntax!\nTry: \`${PREFIX}${CMD_NAME} user_id\``);
       (async () => {
          msg.channel.send(await followUser(args[0]));
-         const data = JSON.stringify({ids:followed_users.map(v => v.id)});
+         const data = JSON.stringify({ ids: followed_users.map(v => v.id) });
          fs.writeFile('ids.json', data, err => {
             if (err) return;
          });
@@ -54,7 +54,7 @@ client.on('message', msg => {
       if (index !== -1) {
          followed_users.splice(index, 1);
       }
-      const data = JSON.stringify({ids:followed_users.map(v => v.id)});
+      const data = JSON.stringify({ ids: followed_users.map(v => v.id) });
       fs.writeFile('ids.json', data, err => {
          if (err) return;
       });
@@ -75,6 +75,30 @@ client.on('message', msg => {
       return msg.channel.send(`Prefix set to: \`${PREFIX}\``);
    }
 
+   if (CMD_NAME === 'ss') {
+      if (args.length != 1 || !isUpelUrlValid(args[0])) return msg.reply(`Incorrect syntax!\nTry: \`${PREFIX}${CMD_NAME} upel_page_url\``);
+      (async () => {
+         const page = await browser.newPage();
+         await page.goto(args[0], { waitUntil: 'domcontentloaded' });
+         await page.screenshot({ path: '1.png', fullPage: true });
+         await page.close();
+         
+         msg.channel.send({
+            files: ['1.png']
+         });
+      })();
+      return;
+   }
+   
+   if (CMD_NAME === 'relog') {
+      (async () => {
+         if (await login()) {
+            msg.channel.send(`${client.user.username} has logged into UPeL.`);
+         }
+      })();
+      return;
+   }
+   
    if (CMD_NAME === 'help') {
       msg.channel.send('help command');
       return;
@@ -90,13 +114,18 @@ async function login() {
    await page.type('[name=username]', process.env.NR_INDEKSU);
    await page.type('[name=password]', process.env.PASSWORD);
    await page.click('[type=submit]');
-   
-   fs.readFile('ids.json', (err, data) => {
-      if (err) return;
-      JSON.parse(data)['ids'].forEach(id => followUser(id, false));
-  });
+   const content = await page.content();
 
-  console.log(`${client.user.username} has logged into UPeL.`)
+   const isBotLoggedIntoUpel = !content.includes('Zaloguj');
+   if (!isBotLoggedIntoUpel) return await login();
+
+   fs.readFile('ids.json', (err, data) => {
+      if (err) return false;
+      JSON.parse(data)['ids'].forEach(id => followUser(id, false));
+   });
+
+   console.log(`${client.user.username} has logged into UPeL.`);
+   return true;
 }
 
 async function getUserById(id) {
@@ -104,6 +133,7 @@ async function getUserById(id) {
    await page.goto(`https://upel2.cel.agh.edu.pl/wiet/user/profile.php?id=${id}`, { waitUntil: 'domcontentloaded' });
 
    const $ = cheerio.load(await page.content());
+   await page.close();
    let name = $('h1').first().text();
    if (name == "" || name == "Użytkownik") {
       name = null;
@@ -111,10 +141,10 @@ async function getUserById(id) {
 
    let last_time_online;
    if (name != null) {
-      last_time_online = 
+      last_time_online =
          $('dd').last().text()
-         .match(/\((.*)\)/).pop()
-         .toSeconds();
+            .match(/\((.*)\)/).pop()
+            .toSeconds();
    }
 
    return {
@@ -137,13 +167,24 @@ async function followUser(id, msg = true) {
    return msg ? `Successfully followed user: \`${user.name}\`` : true;
 }
 
-String.prototype.toSeconds = function() { // parse moodle time format to seconds
+function isUpelUrlValid(str) {
+   let url;
+   try {
+      url = new URL(str);
+   } catch (_) {
+      return false;
+   }
+   return (url.protocol === "http:" || url.protocol === "https:") && url.hostname === 'upel2.cel.agh.edu.pl';
+}
+
+String.prototype.toSeconds = function () { // parse moodle time format to seconds
    const arr = this.split(' ');
+   if (arr[0] === 'teraz') return 1;
    let time = 0;
    for (let i = 0; i < arr.length - 1; ++i) {
       if (arr[i + 1].includes('sek')) time += parseInt(arr[i]);
       if (arr[i + 1].includes('min')) time += parseInt(arr[i]) * 60;
-      if (arr[i + 1].includes('godzin')) time += parseInt(arr[i]) * 3600;
+      if (arr[i + 1].includes('godz')) time += parseInt(arr[i]) * 3600;
       if (arr[i + 1].includes('dni')) time += parseInt(arr[i]) * 86400;
    }
    return time;
@@ -151,8 +192,8 @@ String.prototype.toSeconds = function() { // parse moodle time format to seconds
 
 String.prototype.toDDHHMMSS = function () {
    let sec_num = parseInt(this, 10);
-   let days    = Math.floor(sec_num / 86400);
-   let hours   = Math.floor((sec_num - (days * 86400)) / 3600);
+   let days = Math.floor(sec_num / 86400);
+   let hours = Math.floor((sec_num - (days * 86400)) / 3600);
    let minutes = Math.floor((sec_num - (hours * 3600)) / 60);
    let seconds = sec_num - (hours * 3600) - (minutes * 60);
 
@@ -174,10 +215,11 @@ setInterval(() => { // check online status
       await page.goto(`https://upel2.cel.agh.edu.pl/wiet/user/profile.php?id=${user.id}`, { waitUntil: 'domcontentloaded' });
 
       const $ = cheerio.load(await page.content());
-      const last_time_online = 
+      await page.close();
+      const last_time_online =
          $('dd').last().text()
-         .match(/\((.*)\)/).pop()
-         .toSeconds();
+            .match(/\((.*)\)/).pop()
+            .toSeconds();
 
       if (last_time_online < 300) { // user is online
          if (followed_users[i].last_time_online >= 300) { // user was offline
